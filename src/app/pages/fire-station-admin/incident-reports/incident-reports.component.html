@@ -228,13 +228,18 @@
 
   <div class="feedback-modal-content">
     <div class="field rating-field">
-      <label>Rating:</label>
-      <div class="rating-stars">
-        <span *ngFor="let star of [1,2,3,4,5]; let i = index">
-          <i class="star" [ngClass]="i < (selectedFeedback?.rating || 0) ? 'filled' : ''">&#9733;</i>
-        </span>
-      </div>
-    </div>
+  <label>Rating:</label>
+  <div class="rating-stars">
+    <span *ngFor="let star of [1,2,3,4,5]; let i = index">
+      <i class="star"
+         [ngClass]="i < (selectedFeedback?.rating || 0) ? 'filled' : ''"
+         [style.color]="i < (selectedFeedback?.rating || 0) ? getStarColor(selectedFeedback?.rating || 0) : '#ccc'">
+         &#9733;
+      </i>
+    </span>
+  </div>
+</div>
+
 
     <div class="field">
       <label>Message:</label>

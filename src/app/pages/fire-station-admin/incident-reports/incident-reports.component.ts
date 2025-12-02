@@ -20,6 +20,18 @@ const DefaultIcon = L.icon({
 
 (L.Marker.prototype as any).options.icon = DefaultIcon;
 
+interface UiReport {
+  id: string;
+  typeCategory: string;
+  date: string;
+  name: string;
+  read: boolean;
+  userFeedback?: {
+    rating: number;
+    message: string;
+  };
+}
+
 
 @Component({
   selector: 'app-incident-reports',
@@ -50,6 +62,10 @@ export class IncidentReportsComponent implements OnInit, OnDestroy {
   newMessage = '';
   selectedPhoto: string | null = null;
   selectedVoice: string | null = null;
+  stationName: string | null = null;
+  isRead: boolean = false;
+  isNotifRead: boolean = false;
+
 
   showLocationModal: boolean = false;
   selectedReportLocation: { lat: number; lng: number } | null = null;
@@ -92,6 +108,7 @@ export class IncidentReportsComponent implements OnInit, OnDestroy {
   showBfpFeedbackModal = false; // for testing display
 
 
+
   constructor(
     private rtdb: RealtimeDbService,
     private cdr: ChangeDetectorRef
@@ -101,7 +118,8 @@ export class IncidentReportsComponent implements OnInit, OnDestroy {
        Lifecycle Hooks
   --------------------------- */
 ngOnInit() {
-  const stationId = sessionStorage.getItem('stationDocId');
+    const stationId = sessionStorage.getItem('stationDocId');
+  this.stationName = sessionStorage.getItem('stationName'); // <-- add this
   if (!stationId) return;
 
   const categories = ['FireReport', 'OtherEmergencyReport', 'EmergencyMedicalServicesReport', 'SmsReport'];
@@ -123,9 +141,6 @@ ngOnInit() {
     });
   });
 }
-
-
-
 
 
   ngOnDestroy() {
@@ -238,7 +253,10 @@ ngOnInit() {
       voiceBase64: this.selectedVoice || null,
       time: `${hours}:${minutes}`,
       date: now.toISOString().split('T')[0],
-      timestamp: now.getTime()
+      timestamp: now.getTime(),
+      stationName: this.stationName || null,
+      isRead: this.isRead || false,
+      isNotifRead: this.isNotifRead || false
     };
 
     const messagesRef = ref(this.rtdb.db, `AllReport/FireReport/${this.selectedReport.id}/messages`);
@@ -252,10 +270,38 @@ ngOnInit() {
       .catch(err => console.error("Failed to send message", err));
   }
 
-addReport(report: any, category: string) {
-  const reportWithType = { ...report, typeCategory: category };
+  addReport(report: any, category: string) {
+  const currentUserDocId = sessionStorage.getItem('userDocId');
+  console.log('Current User Doc ID:', currentUserDocId);
+  console.log('Raw report.UserFeedback:', report.UserFeedback);
 
-  // Prevent duplicates
+  let userFeedback = { rating: 0, message: 'No message provided' };
+
+  if (report.UserFeedback) {
+    if (currentUserDocId && report.UserFeedback[currentUserDocId]) {
+      userFeedback = {
+        rating: report.UserFeedback[currentUserDocId].rating || 0,
+        message: report.UserFeedback[currentUserDocId].message || 'No message provided'
+      };
+    } else {
+      // pick the first feedback available
+      const firstKey = Object.keys(report.UserFeedback)[0];
+      const firstFeedback = report.UserFeedback[firstKey];
+      userFeedback = {
+        rating: firstFeedback.rating || 0,
+        message: firstFeedback.message || 'No message provided'
+      };
+    }
+  }
+
+  console.log('Processed userFeedback:', userFeedback);
+
+  const reportWithType: UiReport = {
+    ...report,
+    typeCategory: category,
+    userFeedback
+  };
+
   const exists = this.allReports.some(r => r.id === reportWithType.id);
   if (!exists) {
     this.allReports.unshift(reportWithType);
@@ -263,14 +309,34 @@ addReport(report: any, category: string) {
   }
 }
 
+getStarColor(rating: number): string {
+  if (rating >= 4) return 'green';       // Good rating
+  if (rating >= 2) return 'yellow';      // Medium rating
+  return 'red';                           // Low rating
+}
+
+
+
 updateReport(updatedReport: any, category: string) {
+  const currentUserDocId = sessionStorage.getItem('userDocId');
+
+  const userFeedback = currentUserDocId && updatedReport.UserFeedback && updatedReport.UserFeedback[currentUserDocId]
+    ? {
+        rating: updatedReport.UserFeedback[currentUserDocId].rating || 0,
+        message: updatedReport.UserFeedback[currentUserDocId].message || 'No message provided'
+      }
+    : { rating: 0, message: 'No message provided' };
+
   const index = this.allReports.findIndex(r => r.id === updatedReport.id);
   if (index !== -1) {
-    this.allReports[index] = { ...updatedReport, typeCategory: category };
+    this.allReports[index] = {
+      ...updatedReport,
+      typeCategory: category,
+      userFeedback
+    };
     this.filterReports();
   }
 }
-
 
 
 // Remove a report
@@ -414,10 +480,12 @@ closeLocationModal() {
   /* ---------------------------
        User Feedback Modal Functions
   --------------------------- */
-  openFeedbackModal(feedback: any) {
-    this.selectedFeedback = feedback;
-    this.showFeedbackModal = true;
-  }
+openFeedbackModal(report: any) {
+  console.log('Opening feedback modal for report:', report);
+  console.log('report.userFeedback:', report.userFeedback);
+  this.selectedFeedback = report.userFeedback || { rating: 0, message: 'No message provided' };
+  this.showFeedbackModal = true;
+}
 
   closeFeedbackModal() {
     this.showFeedbackModal = false;
