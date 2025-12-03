@@ -93,6 +93,8 @@
   </div>
 </div>
 
+
+
 <!-- =========================
      MESSENGER MODAL
 ========================= -->
@@ -113,10 +115,28 @@
 
   <div class="messages">
     <div class="chat-date">{{ todayDate }}</div>
-    <div *ngFor="let msg of messages" class="bubble" [ngClass]="msg.sender === 'Station' ? 'me' : 'other'">
-      <div class="bubble-text">{{ msg.text }}</div>
+      <div *ngFor="let msg of messages" class="bubble"
+     [ngClass]="{
+       'me': msg.sender === 'Station',
+       'other-text': msg.sender !== 'Station' && msg.messageType === 'text',
+       'other-media': msg.sender !== 'Station' && (msg.messageType === 'image' || msg.messageType === 'audio')
+     }">
+
+      <div class="bubble-text" *ngIf="msg.text">{{ msg.text }}</div>
+
+      <!-- Image -->
+      <img *ngIf="msg.photoBase64"
+          [src]="'data:image/jpeg;base64,' + msg.photoBase64"
+          alt="Image" class="chat-image" />
+
+      <!-- Audio -->
+      <audio *ngIf="msg.voiceBase64" controls>
+        <source [src]="'data:audio/mp3;base64,' + msg.voiceBase64" type="audio/mpeg" />
+      </audio>
+
       <div class="bubble-time">{{ msg.time }}</div>
     </div>
+
   </div>
 
   <div class="input-area">
@@ -206,14 +226,13 @@
       <div *ngIf="!selectedReportDetails.photoBase64" class="no-photo-text">No photo of report</div>
 
       <div class="photo-buttons">
-        <button class="footer-btn accept-btn-footer">ACCEPT</button>
+        <button class="footer-btn accept-btn-footer" (click)="openAcceptModal()">ACCEPT</button>
         <button class="footer-btn backup-btn-footer">REQUEST BACKUP</button>
         <button class="footer-btn close-btn-footer" (click)="closeReportModal()">CLOSE</button>
       </div>
     </div>
   </div>
 </div>
-
 
 
 <!-- =========================
@@ -309,6 +328,42 @@
 
   <div class="feedback-btn-wrapper">
     <button class="feedback-close-btn" (click)="closeBfpFeedbackModal()">Close</button>
+  </div>
+</div>
+
+<!-- =========================
+     ACCEPT MODAL
+========================= -->
+<div class="modal-backdrop" *ngIf="showAcceptModal" (click)="closeAcceptModal()"></div>
+
+<div class="accept-modal" *ngIf="showAcceptModal" (click)="$event.stopPropagation()">
+  <div class="modal-header">
+    <h3>Select Fire Station</h3>
+    <button class="close-btn" (click)="closeAcceptModal()">×</button>
+  </div>
+
+ <div class="modal-content">
+  <ul class="station-list">
+    <li *ngFor="let station of allStations"
+        (click)="selectStation(station)"
+        [class.selected]="station.id === selectedStation?.id">
+      {{ station.stationName }}
+    </li>
+  </ul>
+
+  <div *ngIf="stationDrivers.length > 0" class="drivers-list">
+    <h4>Drivers</h4>
+    <ul>
+      <li *ngFor="let driver of stationDrivers">
+        {{ driver.name }}
+      </li>
+    </ul>
+  </div>
+</div>
+
+
+  <div class="modal-footer">
+    <button class="footer-btn close-btn-footer" (click)="closeAcceptModal()">CLOSE</button>
   </div>
 </div>
 

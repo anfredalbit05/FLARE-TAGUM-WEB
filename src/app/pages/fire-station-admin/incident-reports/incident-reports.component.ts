@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef, ViewChild, ElementRef } from '@angular/core';
 import { RealtimeDbService } from '../../../services/realtime-db';
+import { FirestoreService, FireStationData, DriverData } from '../../../services/firestore.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ref, push } from '@angular/fire/database';
@@ -42,6 +43,10 @@ interface UiReport {
 })
 export class IncidentReportsComponent implements OnInit, OnDestroy {
 
+
+  @ViewChild('routingMapDiv', { static: false }) routingMapDiv!: ElementRef;
+  @ViewChild('geofenceMapDiv', { static: false }) geofenceMapDiv!: ElementRef;
+
   /* ---------------------------
        General Properties
   --------------------------- */
@@ -65,7 +70,7 @@ export class IncidentReportsComponent implements OnInit, OnDestroy {
   stationName: string | null = null;
   isRead: boolean = false;
   isNotifRead: boolean = false;
-
+  messageType: string = "text"
 
   showLocationModal: boolean = false;
   selectedReportLocation: { lat: number; lng: number } | null = null;
@@ -83,6 +88,7 @@ export class IncidentReportsComponent implements OnInit, OnDestroy {
   --------------------------- */
   showReportModal = false;
   selectedReportDetails: any = null;
+
 
   /* ---------------------------
        User Feedback Modal
@@ -111,7 +117,8 @@ export class IncidentReportsComponent implements OnInit, OnDestroy {
 
   constructor(
     private rtdb: RealtimeDbService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private firestoreService: FirestoreService   // <-- add this
   ) {}
 
   /* ---------------------------
@@ -200,6 +207,8 @@ ngOnInit() {
     if (container) container.scrollTop = container.scrollHeight;
   }
 
+
+
   /* ---------------------------
        Chat Modal Functions
   --------------------------- */
@@ -211,6 +220,11 @@ ngOnInit() {
     this.messages = [];
     this.rtdb.listenToMessages(messagesRef, (msg) => {
       if (!this.messages.find(m => m.timestamp === msg.timestamp)) {
+
+            // --- Normalize Android keys ---
+        msg.photoBase64 = msg.photoBase64 || msg.imageBase64 || null;
+        msg.voiceBase64 = msg.voiceBase64 || msg.audioBase64 || null;
+
         this.messages.push(msg);
         this.cdr.detectChanges();
         setTimeout(() => this.scrollToBottom(), 50);
@@ -256,7 +270,8 @@ ngOnInit() {
       timestamp: now.getTime(),
       stationName: this.stationName || null,
       isRead: this.isRead || false,
-      isNotifRead: this.isNotifRead || false
+      isNotifRead: this.isNotifRead || false,
+      messageType: this.messageType || null
     };
 
     const messagesRef = ref(this.rtdb.db, `AllReport/FireReport/${this.selectedReport.id}/messages`);
@@ -388,23 +403,31 @@ initializeMapsSafely(): void {
   const routingDiv = document.getElementById('routingMap');
   const geofenceDiv = document.getElementById('geofenceMap');
 
+  console.log('Checking map divs...');
+  if (!routingDiv) console.warn('Routing map div NOT found!');
+  if (!geofenceDiv) console.warn('Geofence map div NOT found!');
   if (!routingDiv || !geofenceDiv) {
+    console.log('Retrying initializeMapsSafely in 50ms...');
     setTimeout(() => this.initializeMapsSafely(), 50);
     return;
   }
 
+  console.log('Both map divs found. Initializing maps...');
   this.initRoutingMap();
   this.initGeofenceMap();
 
-  // Let DOM settle, then invalidate sizes
   setTimeout(() => {
-    if (this.routingMap) this.routingMap.invalidateSize();
-    if (this.geoMap) this.geoMap.invalidateSize();
-    console.log('Routing map size:', routingDiv.offsetWidth, routingDiv.offsetHeight);
-    console.log('Geofence map size:', geofenceDiv.offsetWidth, geofenceDiv.offsetHeight);
+    console.log('Invalidating map sizes...');
+    if (this.routingMap) {
+      console.log('Routing map div size:', routingDiv.offsetWidth, routingDiv.offsetHeight);
+      this.routingMap.invalidateSize();
+    }
+    if (this.geoMap) {
+      console.log('Geofence map div size:', geofenceDiv.offsetWidth, geofenceDiv.offsetHeight);
+      this.geoMap.invalidateSize();
+    }
   }, 300);
 }
-
 
 initRoutingMap() {
   if (!this.selectedReportLocation) {
@@ -415,15 +438,36 @@ initRoutingMap() {
   const { lat, lng } = this.selectedReportLocation;
   console.log('Initializing routing map at:', lat, lng);
 
-  if (this.routingMap) this.routingMap.remove();
+  if (this.routingMap) {
+    console.log('Removing previous routing map instance');
+    this.routingMap.remove();
+  }
 
-  this.routingMap = L.map('routingMap', { zoomControl: true }).setView([lat, lng], 15);
+  const mapDiv = document.getElementById('routingMap');
+  console.log('Routing map div size before map init:', mapDiv?.offsetWidth, mapDiv?.offsetHeight);
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
-    .addTo(this.routingMap);
+  // Initialize the routing map
+  this.routingMap = L.map('routingMap', {
+    center: [lat, lng],
+    zoom: 15,
+    dragging: false,          // disable dragging
+    touchZoom: false,         // disable pinch zoom on mobile
+    scrollWheelZoom: false,   // disable scroll wheel zoom
+    doubleClickZoom: false,   // disable double click zoom
+    boxZoom: false,
+    keyboard: false,
+    zoomControl: false         // optionally hide the zoom buttons
+  });
 
+  // Add tile layer
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(this.routingMap);
+
+  // Add marker
   L.marker([lat, lng]).addTo(this.routingMap);
-  console.log('Routing map marker added');
+
+  console.log('Routing map initialized and marker added');
 }
 
 initGeofenceMap() {
@@ -435,18 +479,26 @@ initGeofenceMap() {
   const { lat, lng } = this.selectedReportLocation;
   console.log('Initializing geofence map at:', lat, lng);
 
-  if (this.geoMap) this.geoMap.remove();
+  if (this.geoMap) {
+    console.log('Removing previous geofence map instance');
+    this.geoMap.remove();
+  }
 
-  this.geoMap = L.map('geofenceMap').setView([lat, lng], 17);
+  const mapDiv = document.getElementById('geofenceMap');
+  console.log('Geofence map div size before map init:', mapDiv?.offsetWidth, mapDiv?.offsetHeight);
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
-    .addTo(this.geoMap);
+  this.geoMap = L.map('geofenceMap', { zoomControl: true }).setView([lat, lng], 17);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(this.geoMap);
 
   L.marker([lat, lng]).addTo(this.geoMap);
-  console.log('Geofence map marker added');
+  console.log('Geofence map initialized and marker added');
 
   this.geofenceCount = 0;
 }
+
 
 
 closeLocationModal() {
@@ -505,5 +557,69 @@ openFeedbackModal(report: any) {
     this.showBfpFeedbackModal = false;
     this.selectedReportDetails = null;
   }
+
+  /* ---------------------------
+       Accept Modal Properties
+--------------------------- */
+showAcceptModal = false;
+allStations: FireStationData[] = [];  // includes main station + sub stations
+currentStation: FireStationData | null = null;
+
+/* ---------------------------
+       Accept Modal Functions
+--------------------------- */
+async openAcceptModal() {
+  this.allStations = []; // clear previous data
+  await this.loadStations();  // populate main + sub stations
+  this.showAcceptModal = true; // now show the modal
+}
+
+
+closeAcceptModal() {
+  this.showAcceptModal = false;
+}
+
+async loadStations() {
+  const stationDocId = sessionStorage.getItem('stationDocId');
+  if (!stationDocId) return;
+
+  // Get main station
+  const mainStation = await this.firestoreService.getFireStationByEmail(sessionStorage.getItem('email') || '');
+  if (mainStation) {
+    this.currentStation = mainStation;
+    this.allStations.push(mainStation);
+
+    console.log('🔥 Main Station:', {
+      name: mainStation['stationName'] ?? 'N/A',
+      id: mainStation['id'] ?? 'N/A'
+    });
+  }
+
+  // Get sub stations
+  const subStations = await this.firestoreService.getSubStationsByParent(stationDocId);
+  this.allStations.push(...subStations);
+
+  console.log('🔥 Substations:', subStations.map(s => ({
+    name: s['stationName'] ?? 'N/A',
+    id: s['id'] ?? 'N/A'
+  })));
+}
+
+
+// IncidentReportsComponent.ts
+selectedStation: FireStationData | null = null;
+stationDrivers: DriverData[] = [];
+
+
+async selectStation(station: FireStationData) {
+  this.selectedStation = station;
+  if (!station?.id) return;
+
+  // Fetch drivers for this station
+  this.stationDrivers = await this.firestoreService.getDriversByStation(station.id);
+
+  console.log('Drivers for', station.stationName, ':', this.stationDrivers);
+}
+
 
 }

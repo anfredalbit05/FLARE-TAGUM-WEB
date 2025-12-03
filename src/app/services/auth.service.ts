@@ -59,8 +59,6 @@ export class AuthService {
       return { success: true, accountType: 'firestation' };
     }
 
-
-
       return { success: false, message: 'Account not found in Admin or FireStations.' };
 
     } catch (error: any) {
